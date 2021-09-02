@@ -1,0 +1,148 @@
+<header class="post-header d-block mb-6">
+      <div class="date text-mono f5 my-3">February 3, 2021</div>
+      <h1 class="my-2 h00-mktg lh-condensed">GHSL-2021-030: ReDoS (Regular expression Denial of Service in CodeMirror</h1>
+
+      
+      
+      
+      
+      
+
+      
+
+      <a target="_blank" class="sc-frDJqD SgxRc d-inline-flex flex-row flex-items-center text-gray" href="https://github.com/ghsecuritylab">
+        <img class="mr-3" src="https://avatars.githubusercontent.com/u/61799930?s=35" height="35" width="35">
+        <span>GitHub Security Lab</span>
+      </a>
+    </header>
+
+    <main id="content" class="markdown-body" aria-label="Content">
+      <h2 id="coordinated-disclosure-timeline">Coordinated Disclosure Timeline</h2>
+<ul>
+  <li>2021-01-21: Emailed report to marijnh@gmail.com</li>
+  <li>2021-01-22: Reply from marijnh@gmail.com to say that the bug is now fixed by <a href="https://github.com/codemirror/CodeMirror/commit/2f401f876379fdbfbf97422816e3f2">commit 2f401f8</a>. The commit is publicly visible, so the embargo is lifted.</li>
+  <li>2021-01-22: Emailed marijnh@gmail.com to ask if there will be an advisory or new release.</li>
+  <li>2021-01-22: Reply from marijnh@gmail.com: “Sorry, but I don’t treat language mode hangs as vulnerabilities. The worst you can do with them is freeze people’s browser tab in very specific circumstances, which is annoying, but not that dangerous.”</li>
+</ul>
+
+<h2 id="summary">Summary</h2>
+
+<p>The project contains one or more regular expressions that are vulnerable to <a href="https://en.wikipedia.org/wiki/ReDoS">ReDoS</a> (Regular Expression Denial of Service)</p>
+
+<h2 id="product">Product</h2>
+
+<p>CodeMirror</p>
+
+<h2 id="tested-version">Tested Version</h2>
+
+<p>Latest commit at the time of reporting (January 21, 2021).</p>
+
+<h2 id="details">Details</h2>
+
+<h3 id="redos">ReDoS</h3>
+
+<p>ReDoS, or Regular Expression Denial of Service, is a vulnerability affecting poorly constructed and potentially inefficient regular expressions which can make them perform extremely badly given a creatively constructed input string.</p>
+
+<p>For the specific regular expression reported, it is possible to force it to work with an <code class="language-plaintext highlighter-rouge">O(2^n)</code> runtime performance when there is <a href="http://en.wikipedia.org/wiki/ReDoS#Exponential_backtracking">exponential backtracking</a>.</p>
+
+<p>ReDoS can be caused by ambiguity or overlapping between some regex clauses. These badly performing regular expressions can become a security issue if a user can control the input. For example if the project is an input validation library, then the project could be used by a server to validate untrusted user input. There is no one size fits all when it comes to fixing ReDoS. But in general it is about removing ambiguity/overlap inside the regular expression.</p>
+
+<p>Before showing the vulnerable regex, it may be helpful to show some examples of regular expressions vulnerable to ReDoS and how to fix them. If you are familiar with this vulnerability and how to fix it, please skip this section.</p>
+
+<hr />
+
+<pre><code class="language-JavaScript">var reg = /&lt;!--(.|\s)*?--&gt;/g;
+</code></pre>
+
+<p>The above regular expression matches the start of an HTML comment, followed by any characters, followed by the end of a HTML comment.
+The dot in the regular expression (<code class="language-plaintext highlighter-rouge">.</code>) matches any char except newlines, and <code class="language-plaintext highlighter-rouge">\s</code> matches any whitespace.
+Both <code class="language-plaintext highlighter-rouge">.</code> and <code class="language-plaintext highlighter-rouge">\s</code> matches whitespace such as the space character.
+There are therefore many possible ways for this regular expression to match a sequence of spaces.
+This becomes a problem if the input is a string that starts with <code class="language-plaintext highlighter-rouge">&lt;!--</code> followed by a long sequence of spaces, because the regular expression evaluator will try every possible way of matching the spaces
+(see this debugging session for an example: https://regex101.com/r/XvYgkN/1/debugger).</p>
+
+<p>The fix is to remove the ambiguity, which can be done by changing the regular expression to the below, where there is no overlap between the different elements of the regular expression.</p>
+
+<pre><code class="language-JavaScript">var reg = /&lt;!--(.|\r|\n)*?--&gt;/g;
+</code></pre>
+
+<hr />
+
+<pre><code class="language-JavaScript">var reg = /(\w+_?)+_(\d+)/;
+</code></pre>
+
+<p>The above matches a snake_case identifier that ends with some digits.
+However, for a string starting with lots of letters, there many ways for the regular expression to match those letters, due to the regex having a repetition matching letters (<code class="language-plaintext highlighter-rouge">w+</code>) inside another repetition that can match letters (<code class="language-plaintext highlighter-rouge">(\w+_?)+</code>).
+The regular expression evaluator will try every possible grouping of letters into smaller groups of letters (see this debugging session for an example: https://regex101.com/r/fmci1j/1/debugger).
+The fix is again to remove ambiguity, by changing the inner repetition to match groups of letters that must end with an underscore.</p>
+
+<pre><code class="language-JavaScript">var reg = /(\w+_)+(\d+)/;
+</code></pre>
+
+<hr />
+
+<p>Often the regular expressions are not as simple as the examples above.
+Like the below regular expression <a href="https://github.com/microsoft/vscode/pull/109964/files">that used to be part of VS Code</a>.
+(the top regular expression is the vulnerable, the bottom is the fixed)</p>
+
+<pre><code class="language-JavaScript">var linkPattern = /(\[((!\[[^\]]*?\]\(\s*)([^\s\(\)]+?)\s*\)\]|(?:\\\]|[^\]])*\])\(\s*)(([^\s\(\)]|\(\S*?\))+)\s*(".*?")?\)/g;
+var linkPattern = /(\[((!\[[^\]]*?\]\(\s*)([^\s\(\)]+?)\s*\)\]|(?:\\\]|[^\]])*\])\(\s*)(([^\s\(\)]|\([^\s\(\)]*?\))+)\s*(".*?")?\)/g;
+</code></pre>
+
+<p>But this example is actually very similar to the first example.
+A section of the regular expression that was too general (<code class="language-plaintext highlighter-rouge">\S</code>) was changed to something a bit more specific (<code class="language-plaintext highlighter-rouge">[^\s\(\)]</code>) to remove overlap with another part of the regular expression.</p>
+
+<hr />
+
+<h3 id="vulnerability">Vulnerability</h3>
+
+<p>This vulnerability was found using a <a href="https://codeql.github.com/">CodeQL</a> query which identifies inefficient regular expressions.
+<a href="https://lgtm.com/projects/g/codemirror/CodeMirror?mode=list&amp;id=js%2Fredos">Link to query run</a>.</p>
+
+<p>Note: the query also shows a result related to xml-parsing in markdown, but that result is a false positive.</p>
+
+<h3 id="poc">PoC</h3>
+<ul>
+  <li>Open this webpage: https://codemirror.net/mode/markdown/</li>
+  <li>Paste the below text into the editor:
+    <div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[s]: /foo  (\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+</code></pre></div>    </div>
+  </li>
+</ul>
+
+<p>CodeMirror also has many regular expressions with polynomial runtime.
+<a href="https://lgtm.com/query/5049463719351736337/">Link to query run for polynomial-redos</a>.</p>
+
+<p>Changing these regular expressions such that they don’t have a polynomial worst case performance is extremely difficult.
+I think a reasonable solution is to limit the length of each line that is syntax-highlighted.</p>
+
+<p>Here is a PoC for polynomial-ReDoS in <code class="language-plaintext highlighter-rouge">clike.js</code>.
+(The relevant code has been copy-pasted into the PoC).</p>
+<pre><code class="language-JavaScript">var basicCTypes = ["int", "long", "char", "short", "double", "float", "unsigned", "signed", "void", "bool"];
+
+function cTypes(identifier) {
+    return basicCTypes.propertyIsEnumerable(identifier) || /.+_t$/.test(identifier); // &lt;- /.+_t$/ is the problem.
+}
+
+let str = "a";
+
+while (true) {
+    const start = Date.now();
+    if (cTypes(str)) { console.log("Miracle!"); }
+    const end = Date.now();
+    str += str;
+    console.log("With " + str.length + " chars it took: " + (end - start) + " ms to highlight.");
+}
+</code></pre>
+
+<h3 id="impact">Impact</h3>
+
+<p>This issue may lead to a denial of service.</p>
+
+<h2 id="credit">Credit</h2>
+
+<p>This issue was discovered and reported by GitHub team member <a href="https://github.com/erik-krogh">@erik-krogh (Erik Krogh Kristensen)</a>.</p>
+
+<h2 id="contact">Contact</h2>
+
+<p>You can contact the GHSL team at <code class="language-plaintext highlighter-rouge">securitylab@github.com</code>, please include a reference to <code class="language-plaintext highlighter-rouge">GHSL-2020-030</code> in any communication regarding this issue.
