@@ -5,3 +5,5 @@ get Securitylab_advisories html to local html file
 ```
 py3 getSecuritylab_advisories.py
 ```
+
+# POCs to j/
