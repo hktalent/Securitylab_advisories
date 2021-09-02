@@ -22,7 +22,7 @@ for k in a:
 	try:
 		szU1=url+k+"/"
 		print("\nstart "+szU1)
-		szJsonF="j/"+k+".html"
+		szJsonF="j/"+k+".md"
 		if os.path.exists(szJsonF):
 			continue
 		r1 = requests.get(szU1,verify=False,timeout=myTime)
